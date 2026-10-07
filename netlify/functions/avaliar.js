@@ -35,31 +35,62 @@ const resp = (code, body) => ({
 });
 
 exports.handler = async (event) => {
-  if (event.httpMethod !== 'POST') return resp(405, { erro: 'Método não permitido.' });
-  const key = process.env.GEMINI_API_KEY;
-  if (!key) return resp(500, { erro: 'Chave não configurada no Netlify.' });
-
-  let desafio, prompt;
   try {
-    ({ desafio, prompt } = JSON.parse(event.body || '{}'));
-  } catch (e) {
-    return resp(400, { erro: 'Pedido inválido.' });
-  }
-  if (typeof prompt !== 'string' || prompt.trim().length < 5) return resp(400, { erro: 'Escreva um prompt um pouco maior.' });
-  if (prompt.length > 1500) return resp(400, { erro: 'O prompt está muito longo (máximo 1500 caracteres).' });
-  desafio = String(desafio || '').slice(0, 500);
+    if (event.httpMethod !== 'POST') return resp(405, { erro: 'Método não permitido.' });
+    const key = process.env.GEMINI_API_KEY;
+    if (!key) return resp(500, { erro: 'Chave não configurada no Netlify.' });
 
-  // Tenta vários modelos, na ordem. Se um falhar, passa para o próximo.
-  const modelos = [...new Set([process.env.GEMINI_MODEL, 'gemini-flash-latest', 'gemini-3-flash-preview', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'].filter(Boolean))];
-  const corpo = JSON.stringify({
-    systemInstruction: { parts: [{ text: INSTRUCOES }] },
-    contents: [{ role: 'user', parts: [{ text: `Desafio: ${desafio}\n\n<prompt_do_aluno>\n${prompt}\n</prompt_do_aluno>` }] }],
-    generationConfig: { temperature: 0.3 }
-  });
-  const inicio = Date.now();
-  const detalhes = [];
-
-  for (const modelo of modelos) {
-    if (Date.now() - inicio > 7000) break;
+    let desafio, prompt;
     try {
-      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${m
+      ({ desafio, prompt } = JSON.parse(event.body || '{}'));
+    } catch (e) {
+      return resp(400, { erro: 'Pedido inválido.' });
+    }
+    if (typeof prompt !== 'string' || prompt.trim().length < 5) return resp(400, { erro: 'Escreva um prompt um pouco maior.' });
+    if (prompt.length > 1500) return resp(400, { erro: 'O prompt está muito longo (máximo 1500 caracteres).' });
+    desafio = String(desafio || '').slice(0, 500);
+
+    // Modelos mais rápidos primeiro. Se um falhar ou demorar, tenta o próximo.
+    const modelos = [...new Set([process.env.GEMINI_MODEL, 'gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-flash-latest', 'gemini-3-flash-preview'].filter(Boolean))];
+    const corpo = JSON.stringify({
+      systemInstruction: { parts: [{ text: INSTRUCOES }] },
+      contents: [{ role: 'user', parts: [{ text: `Desafio: ${desafio}\n\n<prompt_do_aluno>\n${prompt}\n</prompt_do_aluno>` }] }],
+      generationConfig: { temperature: 0.3 }
+    });
+
+    const LIMITE = 8500; // tempo total máximo em milissegundos
+    const inicio = Date.now();
+    const detalhes = [];
+
+    for (const modelo of modelos) {
+      const restante = LIMITE - (Date.now() - inicio);
+      if (restante < 1500) break;
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), restante);
+      try {
+        const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+          body: corpo,
+          signal: ctrl.signal
+        });
+        if (r.ok) {
+          const data = await r.json();
+          const texto = (data.candidates?.[0]?.content?.parts || []).map(p => p.text || '').join('').trim();
+          if (texto) return resp(200, { avaliacao: texto });
+          detalhes.push(modelo + ': vazio');
+        } else {
+          detalhes.push(modelo + ': ' + r.status);
+          if (r.status === 401 || r.status === 403) break; // problema com a chave
+        }
+      } catch (e) {
+        detalhes.push(modelo + ': ' + (e && e.name === 'AbortError' ? 'demorou demais' : 'falha de rede'));
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+    return resp(503, { erro: 'Não consegui avaliar agora. Tente de novo em um minutinho. (' + detalhes.join(', ') + ')' });
+  } catch (e) {
+    return resp(500, { erro: 'Erro interno: ' + (e && e.message ? e.message : 'desconhecido') });
+  }
+};
