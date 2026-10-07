@@ -49,25 +49,36 @@ exports.handler = async (event) => {
   if (prompt.length > 1500) return resp(400, { erro: 'O prompt está muito longo (máximo 1500 caracteres).' });
   desafio = String(desafio || '').slice(0, 500);
 
-  const modelo = process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite';
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent`;
-  try {
-    const r = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: INSTRUCOES }] },
-        contents: [{ role: 'user', parts: [{ text: `Desafio: ${desafio}\n\n<prompt_do_aluno>\n${prompt}\n</prompt_do_aluno>` }] }],
-        generationConfig: { temperature: 0.3 }
-      })
-    });
-    if (r.status === 429) return resp(429, { erro: 'Muita gente usando agora. Tente de novo em um minutinho.' });
-    if (!r.ok) return resp(502, { erro: 'O Gemini respondeu com erro ' + r.status + ': ' + (await r.text()).slice(0, 200) });
-    const data = await r.json();
-    const texto = (data.candidates?.[0]?.content?.parts || []).map(p => p.text || '').join('').trim();
-    if (!texto) return resp(502, { erro: 'Resposta vazia. Tente novamente.' });
-    return resp(200, { avaliacao: texto });
-  } catch (e) {
-    return resp(500, { erro: 'Algo deu errado. Tente novamente.' });
+  // Tenta vários modelos, na ordem. Se um estiver sobrecarregado, passa para o próximo.
+  const modelos = [...new Set([process.env.GEMINI_MODEL, 'gemini-flash-latest', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'].filter(Boolean))];
+  const corpo = JSON.stringify({
+    systemInstruction: { parts: [{ text: INSTRUCOES }] },
+    contents: [{ role: 'user', parts: [{ text: `Desafio: ${desafio}\n\n<prompt_do_aluno>\n${prompt}\n</prompt_do_aluno>` }] }],
+    generationConfig: { temperature: 0.3 }
+  });
+  const inicio = Date.now();
+  let ultimo = 0;
+
+  for (const modelo of modelos) {
+    if (Date.now() - inicio > 7000) break;
+    try {
+      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+        body: corpo
+      });
+      if (r.ok) {
+        const data = await r.json();
+        const texto = (data.candidates?.[0]?.content?.parts || []).map(p => p.text || '').join('').trim();
+        if (texto) return resp(200, { avaliacao: texto });
+        ultimo = 'vazio';
+        continue;
+      }
+      ultimo = r.status;
+      if (r.status === 400 || r.status === 401 || r.status === 403) break; // outro modelo não resolve
+    } catch (e) {
+      ultimo = 'rede';
+    }
   }
+  return resp(503, { erro: 'O Gemini está com muita procura agora. Tente de novo em um minutinho. (código ' + ultimo + ')' });
 };
