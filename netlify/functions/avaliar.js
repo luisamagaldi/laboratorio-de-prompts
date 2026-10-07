@@ -62,7 +62,7 @@ exports.handler = async (event) => {
       })
     });
     if (r.status === 429) return resp(429, { erro: 'Muita gente usando agora. Tente de novo em um minutinho.' });
-    if (!r.ok) return resp(502, { erro: 'O Gemini não respondeu. Tente novamente.' });
+    if (!r.ok) return resp(502, { erro: 'O Gemini respondeu com erro ' + r.status + ': ' + (await r.text()).slice(0, 200) });
     const data = await r.json();
     const texto = (data.candidates?.[0]?.content?.parts || []).map(p => p.text || '').join('').trim();
     if (!texto) return resp(502, { erro: 'Resposta vazia. Tente novamente.' });
