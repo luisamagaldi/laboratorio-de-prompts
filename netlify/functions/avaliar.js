@@ -50,23 +50,29 @@ exports.handler = async (event) => {
     if (prompt.length > 1500) return resp(400, { erro: 'O prompt está muito longo (máximo 1500 caracteres).' });
     desafio = String(desafio || '').slice(0, 500);
 
-    // Modelos mais rápidos primeiro. Se um falhar ou demorar, tenta o próximo.
-    const modelos = [...new Set([process.env.GEMINI_MODEL, 'gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-flash-latest', 'gemini-3-flash-preview'].filter(Boolean))];
-    const corpo = JSON.stringify({
-      systemInstruction: { parts: [{ text: INSTRUCOES }] },
-      contents: [{ role: 'user', parts: [{ text: `Desafio: ${desafio}\n\n<prompt_do_aluno>\n${prompt}\n</prompt_do_aluno>` }] }],
-      generationConfig: { temperature: 0.3 }
-    });
+    // Modelos rápidos primeiro. Se um falhar ou demorar, tenta o próximo.
+    const modelos = ['gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-3-flash-preview', 'gemini-flash-latest'];
 
-    const LIMITE = 8500; // tempo total máximo em milissegundos
+    const LIMITE_TOTAL = 9000;     // tempo total máximo (ms)
+    const LIMITE_TENTATIVA = 6000; // tempo máximo por modelo (ms)
     const inicio = Date.now();
     const detalhes = [];
 
     for (const modelo of modelos) {
-      const restante = LIMITE - (Date.now() - inicio);
+      const restante = LIMITE_TOTAL - (Date.now() - inicio);
       if (restante < 1500) break;
+
+      const config = { temperature: 0.3 };
+      if (modelo.startsWith('gemini-2.5')) config.thinkingConfig = { thinkingBudget: 0 }; // responde mais rápido
+
+      const corpo = JSON.stringify({
+        systemInstruction: { parts: [{ text: INSTRUCOES }] },
+        contents: [{ role: 'user', parts: [{ text: `Desafio: ${desafio}\n\n<prompt_do_aluno>\n${prompt}\n</prompt_do_aluno>` }] }],
+        generationConfig: config
+      });
+
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), restante);
+      const timer = setTimeout(() => ctrl.abort(), Math.min(restante, LIMITE_TENTATIVA));
       try {
         const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent`, {
           method: 'POST',
