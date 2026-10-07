@@ -1,5 +1,6 @@
 // Função do Netlify: recebe o prompt do aluno, chama o Gemini e devolve a avaliação PARTS.
 // A chave fica guardada no Netlify (variável GEMINI_API_KEY), nunca no site.
+// A função descobre sozinha quais modelos Flash estão disponíveis, para não quebrar quando um for desligado.
 
 const INSTRUCOES = `Você é um avaliador rigoroso de prompts para uma plataforma educacional. Vou enviar um desafio e o prompt que um aluno escreveu. Avalie pelo método PARTS:
 P = Persona (quem a IA deve ser)
@@ -28,11 +29,41 @@ Próximo passo: uma dica para melhorar
 
 Mostre apenas o PASSO 3 ao aluno.`;
 
+const BASE = 'https://generativelanguage.googleapis.com/v1beta';
+
 const resp = (code, body) => ({
   statusCode: code,
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify(body)
 });
+
+// Pergunta ao Google quais modelos Flash existem e escolhe os melhores candidatos.
+async function descobrirModelos(key) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 2500);
+  try {
+    const r = await fetch(`${BASE}/models?pageSize=200`, { headers: { 'x-goog-api-key': key }, signal: ctrl.signal });
+    if (!r.ok) return [];
+    const data = await r.json();
+    const ids = (data.models || [])
+      .filter(m => (m.supportedGenerationMethods || []).includes('generateContent'))
+      .map(m => String(m.name || '').replace('models/', ''))
+      .filter(id => id.startsWith('gemini-') && id.includes('flash') && !/(tts|image|live|audio|robotics|computer|embedding|latest|thinking|exp|8b|vision)/.test(id));
+    // Prefere: versões estáveis (não preview), depois as "lite" (mais rápidas), depois as mais novas.
+    ids.sort((a, b) => {
+      const pa = /preview/.test(a) ? 1 : 0, pb = /preview/.test(b) ? 1 : 0;
+      if (pa !== pb) return pa - pb;
+      const la = /lite/.test(a) ? 0 : 1, lb = /lite/.test(b) ? 0 : 1;
+      if (la !== lb) return la - lb;
+      return b.localeCompare(a);
+    });
+    return ids.slice(0, 3);
+  } catch (e) {
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 exports.handler = async (event) => {
   try {
@@ -50,20 +81,23 @@ exports.handler = async (event) => {
     if (prompt.length > 1500) return resp(400, { erro: 'O prompt está muito longo (máximo 1500 caracteres).' });
     desafio = String(desafio || '').slice(0, 500);
 
-    // Modelos rápidos primeiro. Se um falhar ou demorar, tenta o próximo.
-    const modelos = ['gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-3-flash-preview', 'gemini-flash-latest'];
-
-    const LIMITE_TOTAL = 9000;     // tempo total máximo (ms)
-    const LIMITE_TENTATIVA = 6000; // tempo máximo por modelo (ms)
+    const LIMITE_TOTAL = 9500;     // tempo total máximo (ms)
+    const LIMITE_TENTATIVA = 5500; // tempo máximo por modelo (ms)
     const inicio = Date.now();
     const detalhes = [];
+
+    let modelos = await descobrirModelos(key);
+    if (modelos.length === 0) {
+      detalhes.push('lista de modelos indisponível');
+      modelos = ['gemini-3.1-flash-lite', 'gemini-3-flash-preview'];
+    }
 
     for (const modelo of modelos) {
       const restante = LIMITE_TOTAL - (Date.now() - inicio);
       if (restante < 1500) break;
 
-      const config = { temperature: 0.3 };
-      if (modelo.startsWith('gemini-2.5')) config.thinkingConfig = { thinkingBudget: 0 }; // responde mais rápido
+      const config = { temperature: 0.3, maxOutputTokens: 900 };
+      if (modelo.startsWith('gemini-2.5')) config.thinkingConfig = { thinkingBudget: 0 };
 
       const corpo = JSON.stringify({
         systemInstruction: { parts: [{ text: INSTRUCOES }] },
@@ -74,7 +108,7 @@ exports.handler = async (event) => {
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), Math.min(restante, LIMITE_TENTATIVA));
       try {
-        const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent`, {
+        const r = await fetch(`${BASE}/models/${modelo}:generateContent`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
           body: corpo,
