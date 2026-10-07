@@ -36,6 +36,11 @@ textarea{width:100%;min-height:150px;margin-top:8px;padding:12px;font:inherit;co
 .lines p{margin:0;padding:10px 0;border-top:1px dashed var(--mute)}
 .lines p:first-child{border-top:0}
 .lines b{font-family:'Bricolage Grotesque',sans-serif}
+.trail{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 16px}
+.trail button{font:inherit;font-weight:700;min-width:44px;padding:6px 12px;border:2px solid var(--line);background:var(--card);color:var(--ink);border-radius:10px;cursor:pointer}
+.trail button[aria-pressed=true]{background:var(--hl);color:#12303a}
+.foco{font-size:.9rem;color:var(--mute);margin:0 0 8px}
+.win{font-weight:700;color:var(--ok);margin-top:14px}
 .err{color:var(--bad);font-weight:700;margin-top:10px}
 .hist{padding-left:18px;margin:8px 0 0}
 .warn{font-size:.85rem;color:var(--mute);border-left:4px solid var(--hl);padding-left:10px;margin:0 0 18px}
@@ -49,9 +54,12 @@ footer{font-size:.9rem;color:var(--mute);border-top:2px solid var(--line);paddin
 <p class="sub">Escreva um prompt, veja a nota em cada parte do PARTS e melhore até chegar lá. Aqui ninguém assiste aula: a gente experimenta.</p>
 <div class="tabs" id="tabs" role="group" aria-label="Escolha o público"></div>
 
+<div class="trail" id="trail" role="group" aria-label="Trilha de desafios"></div>
+
 <section class="card">
   <span class="badge" id="tag"></span>
   <h2 id="tit"></h2>
+  <p class="foco" id="foco"></p>
   <p id="txt"></p>
   <label for="inp" style="font-weight:700">Seu prompt</label>
   <textarea id="inp" maxlength="1500" placeholder="Escreva aqui como você pediria para a IA..."></textarea>
@@ -68,43 +76,70 @@ footer{font-size:.9rem;color:var(--mute);border-top:2px solid var(--line);paddin
   <div class="bar"><i id="bar" style="width:0"></i></div>
   <div class="lines" id="lines"></div>
   <p id="prog" style="font-weight:700;margin-top:14px"></p>
+  <div id="nxt"></div>
   <ol class="hist" id="hist"></ol>
 </section>
 
-<p class="warn">Não escreva dados pessoais (nome completo, endereço, telefone) nos prompts. A avaliação é feita pela IA Gemini e os textos enviados podem ser usados pelo Google para melhorar seus produtos.</p>
+<p class="warn">Seu progresso fica salvo só neste aparelho. Não escreva dados pessoais (nome completo, endereço, telefone) nos prompts. A avaliação é feita pela IA Gemini e os textos enviados podem ser usados pelo Google para melhorar seus produtos.</p>
 
 <footer>Criado por Luisa Magaldi, Embaixadora Estudantil do Google · Projeto independente</footer>
 </main>
 <script>
 const D={
-teen:{l:'Adolescentes',tag:'Desafio de estudo',t:'Vire seu tutor particular',x:'Você tem prova de Biologia sobre fotossíntese na sexta. Escreva um prompt que faça a IA te ajudar a estudar de verdade, não só elaborar um resumo.',bad:'Me explique fotossíntese.'},
-pro:{l:'Profissionais',tag:'Desafio de trabalho',t:'Da reunião ao plano de ação',x:'Você vai colar a anotação bagunçada de uma reunião de equipe. Escreva um prompt que transforme isso em um plano de ação claro.',bad:'Faça um resumo dessa reunião.'},
-sen:{l:'Público 50+',tag:'Desafio do dia a dia',t:'Entenda sua conta de luz',x:'Chegou uma conta de luz com termos que você não entende. Escreva um prompt para a IA explicar a conta com calma e em linguagem simples.',bad:'Explique minha conta de luz.'}
+teen:{l:'Adolescentes',tag:'Desafio de estudo',ch:[
+{t:'Vire seu tutor particular',foco:'Persona e Público',x:'Você tem prova de Biologia sobre fotossíntese na sexta. Escreva um prompt que faça a IA te ajudar a estudar de verdade, não só dar um resumo.',bad:'Me explique fotossíntese.'},
+{t:'Aprenda errando',foco:'Regras',x:'Você não está entendendo equações do 2º grau. Escreva um prompt para a IA treinar você com exercícios, corrigindo seus erros sem entregar a resposta de cara.',bad:'Me dê exercícios de equação do 2º grau.'},
+{t:'Revisor de redação',foco:'Ação e Formato',x:'Você escreveu um parágrafo de redação e quer melhorá-lo. Escreva um prompt para a IA revisar o texto que você vai colar, apontando o que melhorar sem reescrever tudo por você.',bad:'Corrija minha redação.'},
+{t:'Treino de inglês',foco:'Persona e Regras',x:'Você vai apresentar um trabalho em inglês na semana que vem. Escreva um prompt para a IA treinar conversação com você e corrigir seus erros.',bad:'Vamos conversar em inglês.'},
+{t:'Linha do tempo',foco:'Estilo e formato',x:'Você precisa decorar os eventos da Revolução Francesa para a prova. Escreva um prompt que faça a IA organizar o conteúdo de um jeito fácil de memorizar.',bad:'Resuma a Revolução Francesa.'},
+{t:'Seu assistente de estudos',foco:'As 5 partes juntas',x:'Desafio final: crie um prompt que transforme a IA no seu assistente de estudos para qualquer matéria. Use persona, ação, regras, seu perfil de aluno e o formato das respostas.',bad:'Me ajude a estudar.'}]},
+pro:{l:'Profissionais',tag:'Desafio de trabalho',ch:[
+{t:'Da reunião ao plano de ação',foco:'As 5 partes juntas',x:'Você vai colar a anotação bagunçada de uma reunião de equipe. Escreva um prompt que transforme isso em um plano de ação claro.',bad:'Faça um resumo dessa reunião.'}]},
+sen:{l:'Público 50+',tag:'Desafio do dia a dia',ch:[
+{t:'Entenda sua conta de luz',foco:'As 5 partes juntas',x:'Chegou uma conta de luz com termos que você não entende. Escreva um prompt para a IA explicar a conta com calma e em linguagem simples.',bad:'Explique minha conta de luz.'}]}
 };
-let cur='teen',hist={teen:[],pro:[],sen:[]};
+let cur='teen',idx=0,hist={},done={};
+try{done=JSON.parse(localStorage.getItem('lp_done')||'{}')}catch(e){}
 const $=id=>document.getElementById(id);
-function tabs(){const t=$('tabs');t.innerHTML='';for(const k in D){const b=document.createElement('button');b.textContent=D[k].l;b.setAttribute('aria-pressed',k===cur);b.onclick=()=>{cur=k;$('inp').value='';$('cnt').textContent=0;$('res').hidden=true;$('err').textContent='';tabs();show()};t.appendChild(b)}}
-function show(){const d=D[cur];$('tag').textContent=d.tag;$('tit').textContent=d.t;$('txt').textContent=d.x;renderHist()}
-function renderHist(){const h=hist[cur],o=$('hist');o.innerHTML='';h.forEach((e,i)=>{const li=document.createElement('li');li.textContent='Tentativa '+(i+1)+': '+e.s+'/100 — "'+e.t.slice(0,60)+(e.t.length>60?'…':'')+'"';o.appendChild(li)});
+const key=()=>cur+'-'+idx;
+const ch=()=>D[cur].ch[idx];
+function save(){try{localStorage.setItem('lp_done',JSON.stringify(done))}catch(e){}}
+function tabs(){const t=$('tabs');t.innerHTML='';for(const k in D){const b=document.createElement('button');b.textContent=D[k].l;b.setAttribute('aria-pressed',k===cur);b.onclick=()=>{cur=k;idx=0;tabs();show()};t.appendChild(b)}}
+function trail(){const t=$('trail'),n=D[cur].ch.length;t.innerHTML='';t.hidden=n<2;
+ D[cur].ch.forEach((c,i)=>{const b=document.createElement('button');b.textContent=(i+1)+(done[cur+'-'+i]?' ✓':'');b.setAttribute('aria-label','Desafio '+(i+1));b.setAttribute('aria-pressed',i===idx);b.onclick=()=>{idx=i;show()};t.appendChild(b)})}
+function show(){const d=D[cur],c=ch(),n=d.ch.length;
+ $('inp').value='';$('cnt').textContent=0;$('err').textContent='';$('res').hidden=true;$('nxt').innerHTML='';
+ $('tag').textContent=n>1?'Desafio '+(idx+1)+' de '+n:d.tag;
+ $('tit').textContent=c.t;$('foco').textContent='Foco: '+c.foco;$('txt').textContent=c.x;
+ trail();renderHist()}
+function renderHist(){const h=hist[key()]||[],o=$('hist');o.innerHTML='';
+ h.forEach((e,i)=>{const li=document.createElement('li');li.textContent='Tentativa '+(i+1)+': '+e.s+'/100 — "'+e.t.slice(0,60)+(e.t.length>60?'…':'')+'"';o.appendChild(li)});
  $('prog').textContent=h.length>1?'Antes: '+h[0].s+' → Agora: '+h[h.length-1].s+(h[h.length-1].s>h[0].s?' (+'+(h[h.length-1].s-h[0].s)+')':''):''}
 $('inp').oninput=()=>$('cnt').textContent=$('inp').value.length;
-$('ex').onclick=()=>{$('inp').value=D[cur].bad;$('cnt').textContent=$('inp').value.length;$('inp').focus()};
+$('ex').onclick=()=>{$('inp').value=ch().bad;$('cnt').textContent=$('inp').value.length;$('inp').focus()};
 $('go').onclick=async()=>{
  const s=$('inp').value.trim(),err=$('err'),btn=$('go');err.textContent='';
  if(s.length<5){err.textContent='Escreva um prompt um pouco maior.';$('inp').focus();return}
  btn.disabled=true;btn.textContent='Avaliando...';
  try{
-  const r=await fetch('/.netlify/functions/avaliar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({desafio:D[cur].x,prompt:s})});
+  const c=ch();
+  const r=await fetch('/.netlify/functions/avaliar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({desafio:c.x+' (Foco: '+c.foco+')',prompt:s})});
   const j=await r.json();
   if(!r.ok)throw new Error(j.erro||'Algo deu errado.');
   const txt=j.avaliacao,m=txt.match(/Nota total:\s*(\d{1,3})/i),tot=m?Math.min(100,+m[1]):0;
-  hist[cur].push({s:tot,t:s});
+  (hist[key()]=hist[key()]||[]).push({s:tot,t:s});
   $('res').hidden=false;$('sc').textContent=tot;$('bar').style.width=tot+'%';
   const box=$('lines');box.innerHTML='';
   txt.split('\n').map(l=>l.replace(/\*\*/g,'').trim()).filter(l=>l&&!/^Nota total/i.test(l)).forEach(l=>{
    const p=document.createElement('p'),i=l.indexOf(':');
    if(i>0&&i<12){const b=document.createElement('b');b.textContent=l.slice(0,i+1)+' ';p.append(b,l.slice(i+1).trim())}else p.textContent=l;
    box.appendChild(p)});
+  const nx=$('nxt');nx.innerHTML='';
+  if(tot>=70){done[key()]=1;save();trail();
+   const w=document.createElement('p');w.className='win';w.textContent='Desafio concluído! ✅';nx.appendChild(w);
+   if(idx<D[cur].ch.length-1){const b=document.createElement('button');b.className='btn';b.textContent='Próximo desafio →';b.onclick=()=>{idx++;show();window.scrollTo({top:0,behavior:'smooth'})};nx.appendChild(b)}
+   else if(D[cur].ch.length>1){const q=document.createElement('p');q.textContent='Você terminou a trilha! 🎉';nx.appendChild(q)}
+  }else{const q=document.createElement('p');q.style.fontWeight='700';q.textContent='Chegue a 70 pontos para concluir. Melhore o prompt e avalie de novo.';nx.appendChild(q)}
   renderHist();$('res').scrollIntoView({behavior:'smooth',block:'nearest'});
  }catch(e){err.textContent=e.message}
  btn.disabled=false;btn.textContent='Avaliar meu prompt';
